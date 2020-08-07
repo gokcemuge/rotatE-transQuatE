@@ -41,7 +41,7 @@ class KGEModel(nn.Module):
         self.entity_dim = hidden_dim*2 if double_entity_embedding else hidden_dim
         self.relation_dim = hidden_dim*2 if double_relation_embedding else hidden_dim
 
-        if model_name == 'transQuatE':
+        if model_name == 'TransQuatE':
             self.entity_dim = hidden_dim * 4
             self.relation_dim = hidden_dim * 4
 
@@ -63,7 +63,7 @@ class KGEModel(nn.Module):
         if model_name == 'pRotatE':
             self.modulus = nn.Parameter(torch.Tensor([[0.5 * self.embedding_range.item()]]))
 
-        if model_name == 'transQuatE':
+        if model_name == 'TransQuatE':
             self.rotator_head = nn.Parameter(torch.zeros(nrelation, 4 * hidden_dim))
             nn.init.uniform_(
                 tensor=self.rotator_head,
@@ -78,7 +78,7 @@ class KGEModel(nn.Module):
                 b=self.embedding_range.item()
             )
         #Do not forget to modify this line when you add a new model in the "forward" function
-        if model_name not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE', 'transQuatE']:
+        if model_name not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE', 'TransQuatE']:
             raise ValueError('model %s not supported' % model_name)
             
         if model_name == 'RotatE' and (not double_entity_embedding or double_relation_embedding):
@@ -87,8 +87,8 @@ class KGEModel(nn.Module):
         if model_name == 'ComplEx' and (not double_entity_embedding or not double_relation_embedding):
             raise ValueError('ComplEx should use --double_entity_embedding and --double_relation_embedding')
 
-        #if model_name == 'transQuatE' and (not double_entity_embedding or not double_relation_embedding):
-        #    raise ValueError('transQuatE should use --double_entity_embedding and --double_relation_embedding')
+        #if model_name == 'TransQuatE' and (not double_entity_embedding or not double_relation_embedding):
+        #    raise ValueError('TransQuatE should use --double_entity_embedding and --double_relation_embedding')
         
     def forward(self, sample, mode='single'):
         '''
