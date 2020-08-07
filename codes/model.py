@@ -40,7 +40,12 @@ class KGEModel(nn.Module):
         
         self.entity_dim = hidden_dim*2 if double_entity_embedding else hidden_dim
         self.relation_dim = hidden_dim*2 if double_relation_embedding else hidden_dim
-        
+
+        if model_name == 'transQuatE':
+            self.entity_dim = hidden_dim * 4
+            self.relation_dim = hidden_dim * 4
+
+        #TODO: initalization change
         self.entity_embedding = nn.Parameter(torch.zeros(nentity, self.entity_dim))
         nn.init.uniform_(
             tensor=self.entity_embedding, 
@@ -57,9 +62,23 @@ class KGEModel(nn.Module):
         
         if model_name == 'pRotatE':
             self.modulus = nn.Parameter(torch.Tensor([[0.5 * self.embedding_range.item()]]))
-        
+
+        if model_name == 'transQuatE':
+            self.rotator_head = nn.Parameter(torch.zeros(nrelation, 4 * hidden_dim))
+            nn.init.uniform_(
+                tensor=self.rotator_head,
+                a=-self.embedding_range.item(),
+                b=self.embedding_range.item()
+            )
+
+            self.entity_mapping_regularizer = nn.Parameter(torch.zeros(nentity, 4 * hidden_dim))
+            nn.init.uniform_(
+                tensor=self.entity_mapping_regularizer,
+                a=-self.embedding_range.item(),
+                b=self.embedding_range.item()
+            )
         #Do not forget to modify this line when you add a new model in the "forward" function
-        if model_name not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE']:
+        if model_name not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE', 'transQuatE']:
             raise ValueError('model %s not supported' % model_name)
             
         if model_name == 'RotatE' and (not double_entity_embedding or double_relation_embedding):
@@ -67,6 +86,9 @@ class KGEModel(nn.Module):
 
         if model_name == 'ComplEx' and (not double_entity_embedding or not double_relation_embedding):
             raise ValueError('ComplEx should use --double_entity_embedding and --double_relation_embedding')
+
+        #if model_name == 'transQuatE' and (not double_entity_embedding or not double_relation_embedding):
+        #    raise ValueError('transQuatE should use --double_entity_embedding and --double_relation_embedding')
         
     def forward(self, sample, mode='single'):
         '''
@@ -152,7 +174,8 @@ class KGEModel(nn.Module):
             'DistMult': self.DistMult,
             'ComplEx': self.ComplEx,
             'RotatE': self.RotatE,
-            'pRotatE': self.pRotatE
+            'pRotatE': self.pRotatE,
+            'TransQuatE': self.TransQuatE,
         }
         
         if self.model_name in model_func:
@@ -169,6 +192,56 @@ class KGEModel(nn.Module):
             score = (head + relation) - tail
 
         score = self.gamma.item() - torch.norm(score, p=1, dim=2)
+        return score
+
+    def TransQuatE(self, head, relation, tail,rotator_head,mapping_regularizer, mode):
+        #TODO: head-batch taiil-batch difference?
+        head, head_i, head_j, head_k = torch.chunk(head, 4, dim=2)
+        rot_h, rot_hi, rot_hj, rot_hk = self.normalize_quaternion(rotator_head)  # relationdan gelen bir rotation degree
+
+        # rotating head in 4 dim --- checked
+        rotated_head_real = head * rot_h - head_i * rot_hi - head_j * rot_hj - head_k * rot_hk
+        rotated_head_i = head * rot_hi + head_i * rot_h + head_j * rot_hk - head_k * rot_hj
+        rotated_head_j = head * rot_hj - head_i * rot_hk + head_j * rot_h + head_k * rot_hi
+        rotated_head_k = head * rot_hk + head_i * rot_hj - head_j * rot_hi + head_k * rot_h
+
+        # now translating head
+        tran_real, tran_i, tran_j, tran_k = torch.chunk(relation, 4, dim=2)  # by relation
+        translated_head_real = rotated_head_real + tran_real
+        translated_head_i = rotated_head_i + tran_i
+        translated_head_j = rotated_head_j + tran_j
+        translated_head_k = rotated_head_k + tran_k
+        # -----------------------------------------------------#
+        mapping_regularizer_real, mapping_regularizer_i, mapping_regularizer_j, mapping_regularizer_k = \
+            torch.chunk(mapping_regularizer, 4, dim=2)
+        # TODO:
+        # mapping_regularizer_real, mapping_regularizer_i, mapping_regularizer_j, mapping_regularizer_k = self.normalize_quaternion(mapping_regularizer)
+
+        tail_real, tail_i, tail_j, tail_k = torch.chunk(tail, 4, dim=2)
+        # TODO:Ask
+        # tail_i, tail_j, tail_k = -tail_i, -tail_j, -tail_k
+
+        # rotating mapping_regularizer in 4 dim by tail
+        # --- checked
+        rotated_mapping_regularizer_real = mapping_regularizer_real * tail_real - mapping_regularizer_i * tail_i - mapping_regularizer_j * tail_j - mapping_regularizer_k * tail_k
+        rotated_mapping_regularizer_i = mapping_regularizer_real * tail_i + mapping_regularizer_i * tail_real + mapping_regularizer_j * tail_k - mapping_regularizer_k * tail_j
+        rotated_mapping_regularizer_j = mapping_regularizer_real * tail_j - mapping_regularizer_i * tail_k + mapping_regularizer_j * tail_real + mapping_regularizer_k * tail_i
+        rotated_mapping_regularizer_k = mapping_regularizer_real * tail_k + mapping_regularizer_i * tail_j - mapping_regularizer_j * tail_i + mapping_regularizer_k * tail_real
+
+        score_r = translated_head_real - rotated_mapping_regularizer_real
+        score_i = translated_head_i - rotated_mapping_regularizer_i
+        score_j = translated_head_j - rotated_mapping_regularizer_j
+        score_k = translated_head_k - rotated_mapping_regularizer_k
+
+        score = torch.stack([score_r, score_i, score_j, score_k], dim=0)
+        score = score.norm(dim=0)
+        score = score.sum(dim=2)
+
+        #if mode == 'head-batch':
+        #    score = head + (relation - tail)
+        #else:
+        #    score = (head + relation) - tail
+
         return score
 
     def DistMult(self, head, relation, tail, mode):
@@ -246,6 +319,8 @@ class KGEModel(nn.Module):
 
         score = self.gamma.item() - score.sum(dim = 2) * self.modulus
         return score
+
+
     
     @staticmethod
     def train_step(model, optimizer, train_iterator, args):
@@ -298,7 +373,7 @@ class KGEModel(nn.Module):
             regularization_log = {}
             
         loss.backward()
-
+        #print(loss)
         optimizer.step()
 
         log = {
