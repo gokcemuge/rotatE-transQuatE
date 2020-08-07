@@ -65,16 +65,16 @@ class KGEModel(nn.Module):
             self.modulus = nn.Parameter(torch.Tensor([[0.5 * self.embedding_range.item()]]))
 
         if model_name == 'TransQuatE':
-            self.rotator_head = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
+            self.rotator_head_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
             nn.init.uniform_(
-                tensor=self.rotator_head,
+                tensor=self.rotator_head_embedding,
                 a=-self.embedding_range.item(),
                 b=self.embedding_range.item()
             )
 
-            self.entity_mapping_regularizer = nn.Parameter(torch.zeros(nentity, self.entity_dim))
+            self.mapping_regularizer_embedding = nn.Parameter(torch.zeros(nentity, self.entity_dim))
             nn.init.uniform_(
-                tensor=self.entity_mapping_regularizer,
+                tensor=self.mapping_regularizer_embedding,
                 a=-self.embedding_range.item(),
                 b=self.embedding_range.item()
             )
@@ -108,20 +108,35 @@ class KGEModel(nn.Module):
             head = torch.index_select(
                 self.entity_embedding,
                 dim=0,
-                index=sample[:, 0]
+                index=sample[:, 0]  # head
             ).unsqueeze(1)
 
             relation = torch.index_select(
                 self.relation_embedding,
                 dim=0,
-                index=sample[:, 1]
+                index=sample[:, 1]  # relation
             ).unsqueeze(1)
 
             tail = torch.index_select(
                 self.entity_embedding,
                 dim=0,
-                index=sample[:, 2]
+                index=sample[:, 2]  # tail
             ).unsqueeze(1)
+
+            if self.model_name == 'TransQuatE':
+                # this part has same dimensions as head
+                mapping_regularizer = torch.index_select(
+                    self.mapping_regularizer_embedding,
+                    dim=0,
+                    index=sample[:, 0]  # head
+                ).unsqueeze(1)
+
+                # TODO: check
+                rotator_head = torch.index_select(
+                    self.rotator_head_embedding,
+                    dim=0,
+                    index= sample[:, 1]  # relation
+                ).unsqueeze(1)
 
             #TODO: select rotators here
 
@@ -147,6 +162,21 @@ class KGEModel(nn.Module):
                 index=tail_part[:, 2]
             ).unsqueeze(1)
 
+            if self.model_name == 'TransQuatE':
+                # this part has same dimensions as head
+                mapping_regularizer = torch.index_select(
+                    self.mapping_regularizer_embedding,
+                    dim=0,
+                    index=head_part.view(-1)  # head
+                ).view(batch_size, negative_sample_size, -1)
+
+                # TODO: check
+                rotator_head = torch.index_select(
+                    self.rotator_head_embedding,
+                    dim=0,
+                    index=tail_part[:, 1]  # relation
+                ).unsqueeze(1)
+
         elif mode == 'tail-batch':
             head_part, tail_part = sample
             batch_size, negative_sample_size = tail_part.size(0), tail_part.size(1)
@@ -169,6 +199,21 @@ class KGEModel(nn.Module):
                 index=tail_part.view(-1)
             ).view(batch_size, negative_sample_size, -1)
 
+            if self.model_name == 'TransQuatE':
+                # this part has same dimensions as head
+                mapping_regularizer = torch.index_select(
+                    self.mapping_regularizer_embedding,
+                    dim=0,
+                    index=head_part[:, 0]  # head
+                ).unsqueeze(1)
+
+                # TODO: check
+                rotator_head = torch.index_select(
+                    self.rotator_head_embedding,
+                    dim=0,
+                    index=head_part[:, 1]  # relation
+                ).unsqueeze(1)
+
         else:
             raise ValueError('mode %s not supported' % mode)
 
@@ -182,8 +227,8 @@ class KGEModel(nn.Module):
         }
 
         if self.model_name == 'TransQuatE':
-            score = model_func[self.model_name](head, relation, tail, self.rotator_head,
-                                                self.entity_mapping_regularizer, mode)
+            score = model_func[self.model_name](head, relation, tail, rotator_head,
+                                                mapping_regularizer, mode)
         elif self.model_name in model_func:
             score = model_func[self.model_name](head, relation, tail, mode)
         else:
@@ -192,6 +237,14 @@ class KGEModel(nn.Module):
         return score
 
     def TransE(self, head, relation, tail, mode):
+
+        # dimension check
+
+        print("mode", mode)
+        print("head", head.shape)
+        print("relation", relation.shape)
+        print("tail", tail.shape)
+
         if mode == 'head-batch':
             score = head + (relation - tail)
         else:
