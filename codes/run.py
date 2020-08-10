@@ -61,7 +61,7 @@ def parse_args(args=None):
     parser.add_argument('--warm_up_steps', default=None, type=int)
     
     parser.add_argument('--save_checkpoint_steps', default=10000, type=int)
-    parser.add_argument('--valid_steps', default=10000, type=int)
+    parser.add_argument('--valid_steps', default=1000, type=int)
     parser.add_argument('--log_steps', default=100, type=int, help='train log every xx steps')
     parser.add_argument('--test_log_steps', default=1000, type=int, help='valid/test log every xx steps')
     
@@ -330,10 +330,15 @@ def main(args):
                 log_metrics('Training average', step, metrics)
                 training_logs = []
                 
-            if args.do_valid and step % args.valid_steps == 0:
+            if args.do_valid and step % args.valid_steps == 0 and not step == 0:
                 logging.info('Evaluating on Valid Dataset...')
                 metrics = kge_model.test_step(kge_model, valid_triples, all_true_triples, args)
                 log_metrics('Valid', step, metrics)
+
+                #TODO: remove here afterwards
+                logging.info('Evaluating on Test Dataset...')
+                metrics = kge_model.test_step(kge_model, test_triples, all_true_triples, args)
+                log_metrics('Test', step, metrics)
         
         save_variable_list = {
             'step': step, 

@@ -62,7 +62,7 @@ class TrainDataset(Dataset):
         negative_sample = torch.LongTensor(negative_sample)
 
         positive_sample = torch.LongTensor(positive_sample)
-            
+
         return positive_sample, negative_sample, subsampling_weight, self.mode
     
     @staticmethod
@@ -149,6 +149,10 @@ class TestDataset(Dataset):
         negative_sample = tmp[:, 1]
 
         positive_sample = torch.LongTensor((head, relation, tail))
+
+        # print(self.mode)
+        # print("positive_sample", positive_sample.shape) 3
+        # print("negative_sample", negative_sample.shape) 40943
             
         return positive_sample, negative_sample, filter_bias, self.mode
     
