@@ -19,6 +19,7 @@ from model import KGEModel
 
 from dataloader import TrainDataset
 from dataloader import BidirectionalOneShotIterator
+from dataloader import OnedirectionalOneShotIterator
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
@@ -238,9 +239,9 @@ def main(args):
     if args.do_train:
         # Set training dataloader iterator
         train_dataloader_head = DataLoader(
-            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'head-batch'), 
+            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'head-batch'),
             batch_size=args.batch_size,
-            shuffle=True, 
+            shuffle=True,
             num_workers=max(1, args.cpu_num//2),
             collate_fn=TrainDataset.collate_fn
         )
@@ -252,8 +253,8 @@ def main(args):
             num_workers=max(1, args.cpu_num//2),
             collate_fn=TrainDataset.collate_fn
         )
-        
         train_iterator = BidirectionalOneShotIterator(train_dataloader_head, train_dataloader_tail)
+        #train_iterator = OnedirectionalOneShotIterator(train_dataloader_tail)
         
         # Set training configuration
         current_learning_rate = args.learning_rate
@@ -277,7 +278,7 @@ def main(args):
             warm_up_steps = checkpoint['warm_up_steps']
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     else:
-        logging.info('Ramdomly Initializing %s Model...' % args.model)
+        logging.info('Randomly Initializing %s Model...' % args.model)
         init_step = 0
     
     step = init_step
@@ -329,11 +330,14 @@ def main(args):
                     metrics[metric] = sum([log[metric] for log in training_logs])/len(training_logs)
                 log_metrics('Training average', step, metrics)
                 training_logs = []
-                
+
+            # TODO: uncomment here
             if args.do_valid and step % args.valid_steps == 0 and not step == 0:
-                logging.info('Evaluating on Valid Dataset...')
-                metrics = kge_model.test_step(kge_model, valid_triples, all_true_triples, args)
-                log_metrics('Valid', step, metrics)
+            #if args.do_valid and step % args.valid_steps == 0:
+                # TODO: uncomment here later
+                # logging.info('Evaluating on Valid Dataset...')
+                # metrics = kge_model.test_step(kge_model, valid_triples, all_true_triples, args)
+                # log_metrics('Valid', step, metrics)
 
                 #TODO: remove here afterwards
                 logging.info('Evaluating on Test Dataset...')
