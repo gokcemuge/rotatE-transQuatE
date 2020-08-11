@@ -66,13 +66,12 @@ class KGEModel(nn.Module):
 
         if model_name == 'TransQuatE':
             self.rotator_head_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
-            self.mapping_regularizer_embedding = nn.Parameter(torch.zeros(nentity, self.entity_dim))
-            #self.mapping_regularizer_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
+            self.rotator_tail_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
 
             # init all here
             self.initialize(self.rotator_head_embedding, nrelation, hidden_dim)
-            self.initialize(self.mapping_regularizer_embedding, nentity, hidden_dim)
-            #self.initialize(self.mapping_regularizer_embedding, nrelation, hidden_dim)
+            self.initialize(self.rotator_tail_embedding, nrelation, hidden_dim)
+
             self.initialize(self.entity_embedding, nentity, hidden_dim)
             self.initialize(self.relation_embedding, nrelation, hidden_dim)
 
@@ -96,7 +95,7 @@ class KGEModel(nn.Module):
             '''
 
         # Do not forget to modify this line when you add a new model in the "forward" function
-        if model_name not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE', 'TransQuatE', 'TransQuatE0']:
+        if model_name not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE', 'TransQuatE']:
             raise ValueError('model %s not supported' % model_name)
 
         if model_name == 'RotatE' and (not double_entity_embedding or double_relation_embedding):
@@ -179,27 +178,17 @@ class KGEModel(nn.Module):
 
             if self.model_name == 'TransQuatE':
                 # this part has same dimensions as head
-                mapping_regularizer = torch.index_select(
-                   self.mapping_regularizer_embedding,
+                rotator_tail = torch.index_select(
+                   self.rotator_tail_embedding,
                     dim=0,
-                    index=sample[:, 0]  # head
+                    index=sample[:, 1]  # relation TODO: belki de taillerden seçmek gerek
                 ).unsqueeze(1)
 
-                '''
-                mapping_regularizer = torch.index_select(
-                    self.mapping_regularizer_embedding,
-                    dim=0,
-                    index=sample[:, 1]  # relation
-                ).unsqueeze(1)
-                '''
-                # TODO: check
                 rotator_head = torch.index_select(
                     self.rotator_head_embedding,
                     dim=0,
-                    index= sample[:, 1]  # relation
+                    index=sample[:, 1]  # relation
                 ).unsqueeze(1)
-
-            #TODO: select rotators here
 
         elif mode == 'head-batch':
             tail_part, head_part = sample
@@ -231,19 +220,12 @@ class KGEModel(nn.Module):
 
             if self.model_name == 'TransQuatE':
                 # this part has same dimensions as head
-                mapping_regularizer = torch.index_select(
-                    self.mapping_regularizer_embedding,
-                    dim=0,
-                    index=head_part.view(-1)  # negative headler için
-                ).view(batch_size, negative_sample_size, -1) # batch size kadar negative headler yada all entityler
-                '''
-                # this part has same dimensions as head
-                mapping_regularizer = torch.index_select(
-                    self.mapping_regularizer_embedding,
+                rotator_tail = torch.index_select(
+                    self.rotator_tail_embedding,
                     dim=0,
                     index=tail_part[:, 1]  # relation
-                ).unsqueeze(1) # relation tane head rotator
-                '''
+                ).unsqueeze(1)
+
                 rotator_head = torch.index_select(
                     self.rotator_head_embedding,
                     dim=0,
@@ -275,24 +257,17 @@ class KGEModel(nn.Module):
             tail = torch.index_select(
                 self.entity_embedding,
                 dim=0,
-                index=tail_part.view(-1)
+                index=tail_part.view(-1) #batchsize x neg size kadar tails
             ).view(batch_size, negative_sample_size, -1) # batch size kadar negative tailler yada all entityler
 
             if self.model_name == 'TransQuatE':
                 # this part has same dimensions as head
-                mapping_regularizer = torch.index_select(
-                    self.mapping_regularizer_embedding,
-                    dim=0,
-                    index=head_part[:, 0]  # head
-                ).unsqueeze(1)
-                '''
-                # this part has same dimensions as head
-                mapping_regularizer = torch.index_select(
-                    self.mapping_regularizer_embedding,
+                rotator_tail = torch.index_select(
+                    self.rotator_tail_embedding,
                     dim=0,
                     index=head_part[:, 1]  # relation
                 ).unsqueeze(1)
-                '''
+
                 rotator_head = torch.index_select(
                     self.rotator_head_embedding,
                     dim=0,
@@ -313,7 +288,7 @@ class KGEModel(nn.Module):
 
         if self.model_name == 'TransQuatE':
             score = model_func[self.model_name](head, relation, tail, rotator_head,
-                                                mapping_regularizer, mode)
+                                                rotator_tail, mode)
         elif self.model_name in model_func:
             score = model_func[self.model_name](head, relation, tail, mode)
         else:
@@ -338,6 +313,44 @@ class KGEModel(nn.Module):
         score = self.gamma.item() - torch.norm(score, p=1, dim=2)
         return score
 
+    def TransQuatE(self, head, translation, tail, rotator_head, rotator_tail):
+
+        head, head_i, head_j, head_k = torch.chunk(head, 4, dim=2)
+        tail, tail_i, tail_j, tail_k = torch.chunk(tail, 4, dim=2)
+        # TODO:Ask
+        tail_i, tail_j, tail_k = -tail_i, -tail_j, -tail_k
+
+        tran, tran_i, tran_j, tran_k = torch.chunk(translation, 4, dim=2)  # translations
+        rot_h, rot_hi, rot_hj, rot_hk = self.normalize_quaternion(rotator_head)
+        rot_t, rot_ti, rot_tj, rot_tk = self.normalize_quaternion(rotator_tail)
+
+        #print("rot_h:", rot_h.size())
+        #print("head real:", head.size())
+        #print("rot_t:", rot_t.size())
+        #print("tail real:", tail.size())
+
+        #print("tran real:", tran.size())
+
+        rotated_head_real = head * rot_h - head_i * rot_hi - head_j * rot_hj - head_k * rot_hk
+        rotated_head_i = head * rot_hi + head_i * rot_h + head_j * rot_hk - head_k * rot_hj
+        rotated_head_j = head * rot_hj - head_i * rot_hk + head_j * rot_h + head_k * rot_hi
+        rotated_head_k = head * rot_hk + head_i * rot_hj - head_j * rot_hi + head_k * rot_h
+
+        rotated_tail_real = tail * rot_t - tail_i * rot_ti - tail_j * rot_tj - tail_k * rot_tk
+        rotated_tail_i = tail * rot_ti + tail_i * rot_t + tail_j * rot_tk - tail_k * rot_tj
+        rotated_tail_j = tail * rot_tj - tail_i * rot_hk + tail_j * rot_t + tail_k * rot_ti
+        rotated_tail_k = tail * rot_tk + tail_i * rot_tj - tail_j * rot_ti + tail_k * rot_t
+
+        score_r = rotated_head_real + tran - rotated_tail_real
+        score_i = rotated_head_i + tran_i - rotated_tail_i
+        score_j = rotated_head_j + tran_j - rotated_tail_j
+        score_k = rotated_head_k + tran_k - rotated_tail_k
+
+        score = torch.stack([score_r, score_i, score_j, score_k], dim=0)
+        score = score.norm(dim=0)
+        return -(score.sum(dim=2))
+
+    """   
     def TransQuatE(self, head, relation, tail, rotator_head, mapping_regularizer, mode):
 
         # dimension check
@@ -410,7 +423,7 @@ class KGEModel(nn.Module):
         #    score = (head + relation) - tail
 
         return score
-
+    """
     def TransQuatE0(self, head, relation, tail, rotator_head, mapping_regularizer, mode):
 
         # dimension check
