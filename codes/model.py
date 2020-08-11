@@ -313,7 +313,7 @@ class KGEModel(nn.Module):
         score = self.gamma.item() - torch.norm(score, p=1, dim=2)
         return score
 
-    def TransQuatE(self, head, translation, tail, rotator_head, rotator_tail):
+    def TransQuatE(self, head, translation, tail, rotator_head, rotator_tail, mode):
 
         head, head_i, head_j, head_k = torch.chunk(head, 4, dim=2)
         tail, tail_i, tail_j, tail_k = torch.chunk(tail, 4, dim=2)
